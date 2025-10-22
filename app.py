@@ -1,5 +1,5 @@
 # =====================================
-# Streamlit Web App: 不担保人事用合同记录表自动审核（改进版）
+# Streamlit Web App: 不担保人事用合同记录表自动审核（改进版 完整版）
 # =====================================
 
 import streamlit as st
@@ -9,23 +9,24 @@ from openpyxl.styles import PatternFill
 from io import BytesIO
 from datetime import datetime
 
-st.title("不担保人事用合同记录表自动审核")
+st.title("📊 不担保人事用合同记录表自动审核系统")
 
 # -------- 上传文件 ----------
 uploaded_files = st.file_uploader(
-    "请上传以下文件：不担保表, 放款明细, 字段, 二次明细, 重卡数据",
+    "请上传以下文件：不担保表、放款明细、字段、二次明细、重卡数据",
     type="xlsx",
     accept_multiple_files=True
 )
 
 if not uploaded_files or len(uploaded_files) < 5:
-    st.warning("请上传所有 5 个文件")
+    st.warning("⚠️ 请上传所有 5 个文件后继续")
     st.stop()
 else:
     st.success("✅ 文件上传完成")
 
 # -------- 工具函数 ----------
 def find_file(files_list, keyword):
+    """模糊匹配文件名"""
     for f in files_list:
         if keyword in f.name:
             return f
@@ -35,6 +36,7 @@ def normalize_colname(c):
     return str(c).strip().lower()
 
 def find_col(df, keyword):
+    """模糊匹配列名"""
     if df is None:
         return None
     key = keyword.strip().lower()
@@ -44,6 +46,7 @@ def find_col(df, keyword):
     return None
 
 def find_sheet(xls, keyword):
+    """模糊匹配 sheet 名"""
     for s in xls.sheet_names:
         if keyword in s:
             return s
@@ -66,7 +69,7 @@ xls_fk = pd.ExcelFile(fk_file)
 fk_sheet = find_sheet(xls_fk, "本司")
 fk_df = pd.read_excel(xls_fk, sheet_name=fk_sheet, header=0)
 
-# 字段 sheet 模糊匹配 "重卡"
+# 字段表 sheet 模糊匹配 "重卡"
 xls_zd = pd.ExcelFile(zd_file)
 zd_sheet = find_sheet(xls_zd, "重卡")
 zd_df = pd.read_excel(xls_zd, sheet_name=zd_sheet, header=0)
@@ -91,7 +94,7 @@ mapping_zd = {
     "起租时间": "起租日_商",
     "租赁期限": "总期数_商_资产"
 }
-mapping_ec = {"二次时间": "出本流程时间_节点"}
+mapping_ec = {"二次时间": "出本流程时间"}  # ✅ 改为包含“出本流程时间”的模糊匹配
 mapping_zk = {"结清日期": "核销"}
 
 # -------- 输出准备 ----------
@@ -116,13 +119,13 @@ if not contract_col_main:
     st.error("❌ 在主表中未能找到包含关键词 '合同' 的列，请确认列名。")
     st.stop()
 
-# -------- 比对函数 ----------
+# -------- 辅助函数 ----------
 def normalize_num(val):
-    """去除百分号并尝试转为浮点数"""
+    """去除百分号与多余字符并尝试转为浮点数"""
     if pd.isna(val):
         return None
-    s = str(val).replace("%", "").strip()
-    if s == "":
+    s = str(val).replace("%", "").replace(",", "").strip()
+    if s in ["", "-", "nan"]:
         return None
     try:
         return float(s)
@@ -140,30 +143,34 @@ def same_date_ymd(a, b):
     except Exception:
         return False
 
+# -------- 主比对函数 ----------
 def compare_fields_and_mark(row_idx, row, main_df, main_kw, ref_df, ref_kw, ref_contract_col):
     errors = 0
     main_col = find_col(main_df, main_kw)
     ref_col = find_col(ref_df, ref_kw)
     if not main_col or not ref_col or not ref_contract_col:
         return 0
+
     contract_no = str(row.get(contract_col_main)).strip()
-    if pd.isna(contract_no) or contract_no == "nan" or contract_no == "":
+    if pd.isna(contract_no) or contract_no in ["", "nan"]:
         return 0
+
     ref_rows = ref_df[ref_df[ref_contract_col].astype(str).str.strip() == contract_no]
     if ref_rows.empty:
         return 0
+
     ref_val = ref_rows.iloc[0][ref_col]
     main_val = row.get(main_col)
 
     if pd.isna(main_val) and pd.isna(ref_val):
         return 0
 
-    # ---- 日期字段模糊比较 ----
-    if "时间" in main_kw or "日期" in main_kw or "时间" in ref_kw or "日期" in ref_kw:
+    # ---- 日期比较 ----
+    if any(k in main_kw for k in ["日期", "时间"]) or any(k in ref_kw for k in ["日期", "时间"]):
         if not same_date_ymd(main_val, ref_val):
             errors = 1
     else:
-        # ---- 数值与文本混合比较 ----
+        # ---- 改进：容错数值/文本混合比较 ----
         main_num = normalize_num(main_val)
         ref_num = normalize_num(ref_val)
 
@@ -171,7 +178,9 @@ def compare_fields_and_mark(row_idx, row, main_df, main_kw, ref_df, ref_kw, ref_
             if abs(main_num - ref_num) > 1e-6:
                 errors = 1
         else:
-            if str(main_num).strip() != str(ref_num).strip():
+            main_str = str(main_num).strip().lower().replace(".0", "")
+            ref_str = str(ref_num).strip().lower().replace(".0", "")
+            if main_str != ref_str:
                 errors = 1
 
     # ---- 标红 ----
@@ -179,6 +188,7 @@ def compare_fields_and_mark(row_idx, row, main_df, main_kw, ref_df, ref_kw, ref_
         excel_row = row_idx + 3  # header=1 + 空行
         col_idx = list(main_df.columns).index(main_col) + 1
         ws.cell(excel_row, col_idx).fill = red_fill
+
     return errors
 
 # -------- 主循环 ----------
@@ -203,14 +213,14 @@ for row_idx in range(len(main_df)):
     if has_red:
         ws.cell(excel_row, contract_col_idx_excel).fill = yellow_fill
 
-# -------- 保存并提供下载 ----------
+# -------- 输出 ----------
 output = BytesIO()
 wb.save(output)
 output.seek(0)
 
 st.success(f"✅ 审核完成，共发现 {total_errors} 处不一致。")
 st.download_button(
-    label="下载审核标注版 Excel",
+    label="📥 下载审核标注版 Excel",
     data=output,
     file_name="不担保人事用合同记录表_审核标注版.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
