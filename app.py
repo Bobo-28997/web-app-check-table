@@ -1,5 +1,5 @@
 # =====================================
-# Streamlit Web App: 不担保人事用合同记录表自动审核
+# Streamlit Web App: 不担保人事用合同记录表自动审核（改进版）
 # =====================================
 
 import streamlit as st
@@ -7,6 +7,7 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from io import BytesIO
+from datetime import datetime
 
 st.title("不担保人事用合同记录表自动审核")
 
@@ -17,11 +18,11 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-if uploaded_files and len(uploaded_files) >= 5:
-    st.success("✅ 文件上传完成")
-else:
+if not uploaded_files or len(uploaded_files) < 5:
     st.warning("请上传所有 5 个文件")
     st.stop()
+else:
+    st.success("✅ 文件上传完成")
 
 # -------- 工具函数 ----------
 def find_file(files_list, keyword):
@@ -116,6 +117,29 @@ if not contract_col_main:
     st.stop()
 
 # -------- 比对函数 ----------
+def normalize_num(val):
+    """去除百分号并尝试转为浮点数"""
+    if pd.isna(val):
+        return None
+    s = str(val).replace("%", "").strip()
+    if s == "":
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return s  # 若不是数值，返回原文本
+
+def same_date_ymd(a, b):
+    """判断两个日期是否年月日一致"""
+    try:
+        da = pd.to_datetime(a, errors='coerce')
+        db = pd.to_datetime(b, errors='coerce')
+        if pd.isna(da) or pd.isna(db):
+            return False
+        return (da.year == db.year) and (da.month == db.month) and (da.day == db.day)
+    except Exception:
+        return False
+
 def compare_fields_and_mark(row_idx, row, main_df, main_kw, ref_df, ref_kw, ref_contract_col):
     errors = 0
     main_col = find_col(main_df, main_kw)
@@ -130,20 +154,27 @@ def compare_fields_and_mark(row_idx, row, main_df, main_kw, ref_df, ref_kw, ref_
         return 0
     ref_val = ref_rows.iloc[0][ref_col]
     main_val = row.get(main_col)
+
     if pd.isna(main_val) and pd.isna(ref_val):
         return 0
-    try:
-        if pd.notna(main_val) and pd.notna(ref_val):
-            main_num = float(main_val)
-            ref_num = float(ref_val)
-            if abs(main_num - ref_num) > 1e-9:
+
+    # ---- 日期字段模糊比较 ----
+    if "时间" in main_kw or "日期" in main_kw or "时间" in ref_kw or "日期" in ref_kw:
+        if not same_date_ymd(main_val, ref_val):
+            errors = 1
+    else:
+        # ---- 数值与文本混合比较 ----
+        main_num = normalize_num(main_val)
+        ref_num = normalize_num(ref_val)
+
+        if isinstance(main_num, (int, float)) and isinstance(ref_num, (int, float)):
+            if abs(main_num - ref_num) > 1e-6:
                 errors = 1
         else:
-            if str(main_val).strip() != str(ref_val).strip():
+            if str(main_num).strip() != str(ref_num).strip():
                 errors = 1
-    except Exception:
-        if str(main_val).strip() != str(ref_val).strip():
-            errors = 1
+
+    # ---- 标红 ----
     if errors:
         excel_row = row_idx + 3  # header=1 + 空行
         col_idx = list(main_df.columns).index(main_col) + 1
@@ -168,12 +199,7 @@ for idx, row in main_df.iterrows():
 contract_col_idx_excel = list(main_df.columns).index(contract_col_main) + 1
 for row_idx in range(len(main_df)):
     excel_row = row_idx + 3
-    has_red = False
-    for col_idx in range(1, len(main_df.columns)+1):
-        cell = ws.cell(excel_row, col_idx)
-        if cell.fill == red_fill:
-            has_red = True
-            break
+    has_red = any(ws.cell(excel_row, c).fill == red_fill for c in range(1, len(main_df.columns) + 1))
     if has_red:
         ws.cell(excel_row, contract_col_idx_excel).fill = yellow_fill
 
