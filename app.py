@@ -55,9 +55,9 @@ zd_file   = find_file(uploaded_files, "字段")
 ec_file   = find_file(uploaded_files, "二次明细")
 zk_file   = find_file(uploaded_files, "重卡数据")
 
-# 主表 sheet 模糊匹配 "重卡"
+# 主表 sheet 模糊匹配 "23.4二次"
 xls_main = pd.ExcelFile(main_file)
-target_sheet = find_sheet(xls_main, "重卡")
+target_sheet = find_sheet(xls_main, "23.4二次")
 main_df = pd.read_excel(xls_main, sheet_name=target_sheet, header=1)  # 第二行为列名
 
 # 放款明细 sheet 模糊匹配 "本司"
