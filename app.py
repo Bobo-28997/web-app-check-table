@@ -1,5 +1,5 @@
-# =====================================
-# Streamlit Web App: 不担保人事用合同记录表自动审核（改进版 完整版）
+# ===================================== 
+# Streamlit Web App: 不担保人事用合同记录表自动审核（改进版 完整版 + 百分比容错修复）
 # =====================================
 
 import streamlit as st
@@ -121,13 +121,16 @@ if not contract_col_main:
 
 # -------- 辅助函数 ----------
 def normalize_num(val):
-    """去除百分号与多余字符并尝试转为浮点数"""
+    """去除百分号与多余字符并尝试转为浮点数，自动处理百分比"""
     if pd.isna(val):
         return None
-    s = str(val).replace("%", "").replace(",", "").strip()
+    s = str(val).replace(",", "").strip()
     if s in ["", "-", "nan"]:
         return None
     try:
+        if "%" in s:
+            s = s.replace("%", "")
+            return float(s) / 100
         return float(s)
     except ValueError:
         return s  # 若不是数值，返回原文本
